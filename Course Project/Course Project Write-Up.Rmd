@@ -1,0 +1,135 @@
+
+---
+title: "Machine Learning Course Project Write-Up"
+author: "Alok Pattani"
+date: "Sunday, February 22, 2015"
+output: html_document
+---
+
+**LOADING EXTERNAL PACKAGES USED IN THIS WORK**
+```{r, results ='hide', message = FALSE, collapse =TRUE, strip.white = TRUE}
+library(lattice)
+library(ggplot2)
+library(caret)
+library(rpart)
+library(MASS)
+library(grid)
+library(mvtnorm)
+library(modeltools)
+library(stats4)
+library(strucchange)
+library(zoo)
+library(sandwich)
+library(randomForest)
+library(combinat)
+library(klaR)
+```
+
+**READ IN PROVIDED TRAINING AND TESTING DATA SETS**
+```{r, results = 'hide', message = FALSE, collapse = TRUE, strip.white = TRUE}
+pmltraining <- read.csv("pml-training.csv")
+pmltesting <- read.csv("pml-testing.csv")
+
+summary(pmltraining)
+summary(pmltesting)
+```
+
+**SOME INITIAL LOOKING AT PROVIDED TRAINING SET, REMOVING INCOMPLETE/MISSING DATA**
+```{r, results = 'hide', message = FALSE, collapse = TRUE, strip.white = TRUE}
+#Identify columns with NAs or blanks, to be eliminated later
+colsToKeep <- (colSums(is.na(pmltraining)) == 0 & colSums(pmltraining == "") == 0)
+#First 7 columns aren't really germane to prediction, mark for elimination as well
+colsToKeep[1:7] <- FALSE
+
+#Subset down to meaningful columns and eliminate "no window" rows (look different)
+usabledata <- subset(pmltraining, new_window == "no", select = colsToKeep)
+
+head(usabledata)
+dim(usabledata)
+summary(usabledata)
+```
+
+**TAKE USABLE DATA FROM PROVIDED TRAINING SET, SPLIT INTO "NEW" TRAINING AND TEST SETS**
+```{r, results = 'hide', message = FALSE, warning = FALSE, collapse = TRUE, strip.white = TRUE}
+set.seed(23)
+inTrain <- createDataPartition(y = usabledata$classe, p = 0.75, list = FALSE)
+
+training <- usabledata[inTrain, ]
+testing <- usabledata[-inTrain, ]
+
+#Creating training data set without response for use in some models
+training_noresponse <- subset(training, select = -c(classe))
+```
+
+**BUILD PREDICTION USING CLASSIFICATION TREE ON TRAINING DATA**
+```{r, message = FALSE, warning = FALSE, collapse = TRUE, strip.white = TRUE}
+rpart_model <- rpart(classe ~ ., data = training)
+
+confusionMatrix(predict(rpart_model, type = "class"), training$classe)
+```
+
+**BUILD PREDICTION USING BAGGING ON TRAINING DATA**
+```{r, message = FALSE, warning = FALSE,  collapse = TRUE, strip.white = TRUE}
+bag_model <- bag(y = training$classe, x = training_noresponse, 
+    bagControl = bagControl(fit = ctreeBag$fit, predict = ctreeBag$pred, 
+    aggregate = ctreeBag$aggregate))  
+
+confusionMatrix(predict(bag_model, newdata = training), training$classe)
+```
+
+**BUILD PREDICTION USING RANDOM FOREST ON TRAINING DATA**  
+Random forest already does some cross validation, providing the out of sample error estimate by default.
+```{r, message = FALSE, warning = FALSE, collapse = TRUE, strip.white = TRUE}
+ranfor_model <- randomForest(classe ~ ., data = training)
+
+ranfor_model
+```
+
+**BUILD PREDICTION USING LINEAR DISCRIMINANT ANALYSIS ON TRAINING DATA**
+```{r, message = FALSE, warning = FALSE, collapse = TRUE, strip.white = TRUE}
+lda_model <- lda(classe ~ ., data = training)
+
+confusionMatrix(predict(lda_model)$class, training$classe)
+```
+
+**BUILD PREDICTION USING NAIVE BAYES ON TRAINING DATA**
+```{r, message = FALSE, warning = FALSE, collapse = TRUE, strip.white = TRUE}
+nb_model <- NaiveBayes(classe ~ ., data = training)
+
+confusionMatrix(predict(nb_model, newdata = training)$class, training$classe)
+```
+
+**APPLYING RANDOM FOREST MODEL TO TESTING DATA**  
+Based on the above results, random forest has the highest accuracy of the models tested. So we'll use the random forest model on the testing data as a further cross validation, and to estimate "out-of-sample" accuracy.
+```{r, message = FALSE, warning = FALSE, collapse = TRUE, strip.white = TRUE}
+testing$ranfor_pred_classe <- predict(ranfor_model, newdata = testing)
+
+#Estimate of out-of-sample error rate (as a percentage):
+paste0(round((1 - with(testing, confusionMatrix(ranfor_pred_classe, classe))$overall[1])*100, 1), "%")
+```
+
+**SETTING UP FINAL TESTING DATA SET, THEN APPLYING PREDICTION**
+```{r, message = FALSE, warning = FALSE, collapse = TRUE, strip.white = TRUE}
+#Take provided testing data set, limit down to same columns as training set was
+finaltesting <- subset(pmltesting, select = colsToKeep)
+
+finaltesting$ranfor_pred_classe <- predict(ranfor_model, newdata = finaltesting)
+
+answers <- finaltesting$ranfor_pred_classe
+
+answers
+```
+
+**WRITING PREDICTIONS ON PROVIDED FINAL TESTING SET TO INDIVIDUAL FILES**
+```{r, message = FALSE, warning = FALSE, collapse = TRUE, eval = FALSE, strip.white = TRUE}
+#Function provided by course to create 1 file per answer
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(answers)
+```

@@ -1,11 +1,10 @@
-
 ---
 title: "Machine Learning Course Project Write-Up"
 author: "Alok Pattani"
 date: "Sunday, February 22, 2015"
 output: html_document
 ---
-
+  
 **LOADING EXTERNAL PACKAGES USED IN THIS WORK**
 ```{r, results ='hide', message = FALSE, collapse =TRUE, strip.white = TRUE}
 library(lattice)
@@ -15,17 +14,17 @@ library(rpart)
 library(MASS)
 library(grid)
 library(mvtnorm)
-library(modeltools)
 library(stats4)
-library(strucchange)
+library(modeltools)
 library(zoo)
 library(sandwich)
+library(strucchange)
 library(randomForest)
 library(combinat)
 library(klaR)
 ```
 
-**READ IN PROVIDED TRAINING AND TESTING DATA SETS**
+**READ IN AND LOOK AT PROVIDED TRAINING AND TESTING DATA SETS**
 ```{r, results = 'hide', message = FALSE, collapse = TRUE, strip.white = TRUE}
 pmltraining <- read.csv("pml-training.csv")
 pmltesting <- read.csv("pml-testing.csv")
@@ -34,14 +33,14 @@ summary(pmltraining)
 summary(pmltesting)
 ```
 
-**SOME INITIAL LOOKING AT PROVIDED TRAINING SET, REMOVING INCOMPLETE/MISSING DATA**
+**REMOVING INCOMPLETE OR MISSING DATA FROM INITIAL TRAINING SET**
 ```{r, results = 'hide', message = FALSE, collapse = TRUE, strip.white = TRUE}
 #Identify columns with NAs or blanks, to be eliminated later
 colsToKeep <- (colSums(is.na(pmltraining)) == 0 & colSums(pmltraining == "") == 0)
 #First 7 columns aren't really germane to prediction, mark for elimination as well
 colsToKeep[1:7] <- FALSE
 
-#Subset down to meaningful columns and eliminate "no window" rows (look different)
+#Subset down to meaningful columns and eliminate "no window" rows (look different from rest of data)
 usabledata <- subset(pmltraining, new_window == "no", select = colsToKeep)
 
 head(usabledata)
@@ -49,7 +48,8 @@ dim(usabledata)
 summary(usabledata)
 ```
 
-**TAKE USABLE DATA FROM PROVIDED TRAINING SET, SPLIT INTO "NEW" TRAINING AND TEST SETS**
+**TAKE USABLE DATA FROM PROVIDED TRAINING SET, SPLIT INTO "NEW" TRAINING AND TEST SETS**  
+The model can be chosen based on analysis done on the "new" training set. After that, we can use this "new" test set for cross-validation and out-of-sample error estimation, before applying the model to the "final" test set of 20 observations that are to be submitted.
 ```{r, results = 'hide', message = FALSE, warning = FALSE, collapse = TRUE, strip.white = TRUE}
 set.seed(23)
 inTrain <- createDataPartition(y = usabledata$classe, p = 0.75, list = FALSE)
@@ -60,7 +60,9 @@ testing <- usabledata[-inTrain, ]
 #Creating training data set without response for use in some models
 training_noresponse <- subset(training, select = -c(classe))
 ```
-
+  
+For the next few steps, various techniques learned in the course are used to try to predict the "classe" variable on the training data set. In each case, we use the confusion matrix to look at the accuracy of the predictions on the training data.  
+  
 **BUILD PREDICTION USING CLASSIFICATION TREE ON TRAINING DATA**
 ```{r, message = FALSE, warning = FALSE, collapse = TRUE, strip.white = TRUE}
 rpart_model <- rpart(classe ~ ., data = training)
@@ -78,13 +80,13 @@ confusionMatrix(predict(bag_model, newdata = training), training$classe)
 ```
 
 **BUILD PREDICTION USING RANDOM FOREST ON TRAINING DATA**  
-Random forest already does some cross validation, providing the out of sample error estimate by default.
 ```{r, message = FALSE, warning = FALSE, collapse = TRUE, strip.white = TRUE}
 ranfor_model <- randomForest(classe ~ ., data = training)
 
 ranfor_model
 ```
-
+This random forest implementation already does cross validation, providing the out of sample error estimate as part of the modeling process.  In this case, that value is `r paste0(round(ranfor_model$err.rate[500,1]*100, 2), "%")`.
+  
 **BUILD PREDICTION USING LINEAR DISCRIMINANT ANALYSIS ON TRAINING DATA**
 ```{r, message = FALSE, warning = FALSE, collapse = TRUE, strip.white = TRUE}
 lda_model <- lda(classe ~ ., data = training)
@@ -100,15 +102,15 @@ confusionMatrix(predict(nb_model, newdata = training)$class, training$classe)
 ```
 
 **APPLYING RANDOM FOREST MODEL TO TESTING DATA**  
-Based on the above results, random forest has the highest accuracy of the models tested. So we'll use the random forest model on the testing data as a further cross validation, and to estimate "out-of-sample" accuracy.
+Based on the above results, random forest has the highest accuracy of the models tested (>99%). So we'll use look at the predictions of the random forest model on the test data as a further validation, and to get another estimate of "out-of-sample" accuracy/error.
 ```{r, message = FALSE, warning = FALSE, collapse = TRUE, strip.white = TRUE}
 testing$ranfor_pred_classe <- predict(ranfor_model, newdata = testing)
 
-#Estimate of out-of-sample error rate (as a percentage):
-paste0(round((1 - with(testing, confusionMatrix(ranfor_pred_classe, classe))$overall[1])*100, 1), "%")
+oos_error <- 1 - with(testing, confusionMatrix(ranfor_pred_classe, classe))$overall[1]
 ```
-
-**SETTING UP FINAL TESTING DATA SET, THEN APPLYING PREDICTION**
+The estimated out-of-sample error for this random forest model is `r paste0(round(oos_error*100, 2), "%")`.  
+  
+**SETTING UP FINAL TESTING DATA SET (20 OBSERVATIONS), THEN APPLYING RANDOM FOREST PREDICTION**
 ```{r, message = FALSE, warning = FALSE, collapse = TRUE, strip.white = TRUE}
 #Take provided testing data set, limit down to same columns as training set was
 finaltesting <- subset(pmltesting, select = colsToKeep)
@@ -133,3 +135,4 @@ pml_write_files = function(x){
 
 pml_write_files(answers)
 ```
+The answer files generated by this function were the ones uploaded to the course website as part of the course project assignment.
